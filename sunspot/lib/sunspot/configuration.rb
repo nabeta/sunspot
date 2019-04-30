@@ -8,6 +8,8 @@ module Sunspot
   # Sunspot.config.pagination.default_per_page::
   #   Solr always paginates its results. This sets Sunspot's default result
   #   count per page if it is not explicitly specified in the query.
+  # Sunspot.config.indexing.default_batch_size::
+  #   This sets the batch size for indexing, default is 50
   #
   module Configuration
     class <<self
@@ -20,7 +22,11 @@ module Sunspot
       def build #:nodoc:
         LightConfig.build do
           solr do
-            url 'http://127.0.0.1:8983/solr'
+            url 'http://127.0.0.1:8983/solr/default'
+            read_timeout nil
+            open_timeout nil
+            proxy nil
+            update_format :xml
           end
           master_solr do
             url nil
@@ -28,9 +34,12 @@ module Sunspot
           pagination do
             default_per_page 30
           end
+          indexing do
+            default_batch_size 50
+          end
         end
       end
-      
+
       # Location for the default solr configuration files,
       # required for bootstrapping a new solr installation
       #

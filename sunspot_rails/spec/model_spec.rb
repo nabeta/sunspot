@@ -8,17 +8,17 @@ describe 'ActiveRecord mixin' do
     end
 
     it 'should not commit the model' do
-      Post.search.results.should be_empty
+      expect(Post.search.results).to be_empty
     end
 
     it 'should index the model' do
       Sunspot.commit
-      Post.search.results.should == [@post]
+      expect(Post.search.results).to eq([@post])
     end
 
     it "should not blow up if there's a default scope specifying order" do
       posts = Array.new(2) { |j| PostWithDefaultScope.create! :title => (10-j).to_s }
-      lambda { PostWithDefaultScope.index(:batch_size => 1) }.should_not raise_error
+      expect { PostWithDefaultScope.index(:batch_size => 1) }.not_to raise_error
     end
   end
 
@@ -29,7 +29,7 @@ describe 'ActiveRecord mixin' do
 
     it 'should not break auto-indexing' do
       @post.title = 'Title'
-      lambda { @post.save! }.should_not raise_error
+      expect { @post.save! }.not_to raise_error
     end
   end
 
@@ -40,7 +40,7 @@ describe 'ActiveRecord mixin' do
     end
 
     it 'should immediately index and commit' do
-      Post.search.results.should == [@post]
+      expect(Post.search.results).to eq([@post])
     end
   end
 
@@ -52,12 +52,12 @@ describe 'ActiveRecord mixin' do
     end
 
     it 'should not commit immediately' do
-      Post.search.results.should == [@post]
+      expect(Post.search.results).to eq([@post])
     end
 
     it 'should remove the model from the index' do
       Sunspot.commit
-      Post.search.results.should be_empty
+      expect(Post.search.results).to be_empty
     end
   end
 
@@ -69,7 +69,7 @@ describe 'ActiveRecord mixin' do
     end
 
     it 'should immediately remove the model and commit' do
-      Post.search.results.should be_empty
+      expect(Post.search.results).to be_empty
     end
   end
 
@@ -81,12 +81,12 @@ describe 'ActiveRecord mixin' do
     end
 
     it 'should not commit immediately' do
-      Post.search.results.to_set.should == @posts.to_set
+      expect(Post.search.results.to_set).to eq(@posts.to_set)
     end
 
     it 'should remove all instances from the index' do
       Sunspot.commit
-      Post.search.results.should be_empty
+      expect(Post.search.results).to be_empty
     end
   end
 
@@ -98,7 +98,7 @@ describe 'ActiveRecord mixin' do
     end
 
     it 'should remove all instances from the index and commit immediately' do
-      Post.search.results.should be_empty
+      expect(Post.search.results).to be_empty
     end
   end
 
@@ -109,65 +109,85 @@ describe 'ActiveRecord mixin' do
     end
 
     it 'should return results specified by search' do
-      Post.search do
+      expect(Post.search do
         with :title, 'Test Post'
-      end.results.should == [@post]
+      end.results).to eq([@post])
     end
 
     it 'should not return results excluded by search' do
-      Post.search do
+      expect(Post.search do
         with :title, 'Bogus Post'
-      end.results.should be_empty
-    end
-    
-    it 'should use the include option on the data accessor when specified' do
-      Post.should_receive(:all).with(hash_including(:include => [:blog])).and_return([@post])
-      Post.search do
-        with :title, 'Test Post'
-        data_accessor_for(Post).include = [:blog]
-      end.results.should == [@post]
-    end
-
-    it 'should pass :include option from search call to data accessor' do
-      Post.should_receive(:all).with(hash_including(:include => [:blog])).and_return([@post])
-      Post.search(:include => [:blog]) do
-        with :title, 'Test Post'
-      end.results.should == [@post]
-    end
-    
-    it 'should use the select option from search call to data accessor' do
-      Post.should_receive(:all).with(hash_including(:select => 'title, published_at')).and_return([@post])
-      Post.search(:select => 'title, published_at') do
-        with :title, 'Test Post'
-      end.results.should == [@post]
+      end.results).to be_empty
     end
 
     it 'should not allow bogus options to search' do
-      lambda { Post.search(:bogus => :option) }.should raise_error(ArgumentError)
+      expect { Post.search(:bogus => :option) }.to raise_error(ArgumentError)
+    end
+
+    it 'should pass :include option from search call to data accessor' do
+      expect(Post.search(:include => [:location]) do
+        with :title, 'Test Post'
+      end.data_accessor_for(Post).include).to eq([:location])
+    end
+    
+    it 'should use the include option on the data accessor when specified' do
+      @post.update_attribute(:location, Location.create)
+      post = Post.search do
+        with :title, 'Test Post'
+        data_accessor_for(Post).include = [:location]
+      end.results.first
+
+      expect(Rails.version >= '3.1' ? post.association(:location).loaded? : post.loaded_location?).to be_truthy # Rails 3.1 removed "loaded_#{association}" method
+    end
+    
+    it 'should use the select option from search call to data accessor' do
+      expect(Post.search(:select => 'id, title, body') do
+        with :title, 'Test Post'
+      end.data_accessor_for(Post).select).to eq('id, title, body')
     end
     
     it 'should use the select option on the data accessor when specified' do
-      Post.should_receive(:all).with(hash_including(:select => 'title, published_at')).and_return([@post])
-      Post.search do
+      expect(Post.search do
         with :title, 'Test Post'
-        data_accessor_for(Post).select = [:title, :published_at]
-      end.results.should == [@post]
+        data_accessor_for(Post).select = 'id, title, body'
+      end.results.first.attribute_names.sort).to eq(['body', 'id', 'title'])
     end
     
     it 'should not use the select option on the data accessor when not specified' do
-      Post.should_receive(:all).with(hash_not_including(:select)).and_return([@post])
-      Post.search do
+      expect(Post.search do
         with :title, 'Test Post'
-      end.results.should == [@post]
+      end.results.first.attribute_names).to eq(Post.first.attribute_names)
+    end
+
+    it 'should accept an array as a select option' do
+      expect(Post.search(:select => ['id', 'title', 'body']) do
+        with :title, 'Test Post'
+      end.results.first.attribute_names.sort).to eq(['body', 'id', 'title'])
+    end
+
+    it 'should use the scoped option from search call to data accessor' do
+      expect(Post.search(:scopes => [:includes_location]) do
+        with :title, 'Test Post'
+      end.data_accessor_for(Post).scopes).to eq([:includes_location])
+    end
+
+    it 'should use the scopes option on the data accessor when specified' do
+      @post.update_attribute(:location, Location.create)
+      post = Post.search do
+        with :title, 'Test Post'
+        data_accessor_for(Post).scopes = [:includes_location]
+      end.results.first
+
+      expect(Rails.version >= '3.1' ? post.association(:location).loaded? : post.loaded_location?).to be_truthy # Rails 3.1 removed "loaded_#{association}" method
     end
 
     it 'should gracefully handle nonexistent records' do
       post2 = Post.create!(:title => 'Test Post')
       post2.index!
       post2.destroy
-      Post.search do
+      expect(Post.search do
         with :title, 'Test Post'
-      end.results.should == [@post]
+      end.results).to eq([@post])
     end
 
     it 'should use an ActiveRecord object for coordinates' do
@@ -175,7 +195,7 @@ describe 'ActiveRecord mixin' do
       post.location = Location.create!(:lat => 40.0, :lng => -70.0)
       post.save
       post.index!
-      Post.search { with(:location).near(40.0, -70.0) }.results.should == [post]
+      expect(Post.search { with(:location).near(40.0, -70.0) }.results).to eq([post])
     end
 
   end
@@ -187,17 +207,17 @@ describe 'ActiveRecord mixin' do
     end
 
     it 'should return IDs' do
-      Post.search_ids.to_set.should == @posts.map { |post| post.id }.to_set
+      expect(Post.search_ids.to_set).to eq(@posts.map { |post| post.id }.to_set)
     end
   end
   
   describe 'searchable?()' do
     it 'should not be true for models that have not been configured for search' do
-      Location.should_not be_searchable
+      expect(Location).not_to be_searchable
     end
 
     it 'should be true for models that have been configured for search' do
-      Post.should be_searchable
+      expect(Post).to be_searchable
     end
   end
 
@@ -209,7 +229,7 @@ describe 'ActiveRecord mixin' do
     end
 
     it 'should return IDs of objects that are in the index but not the database' do
-      Post.index_orphans.should == [@posts.first.id]
+      expect(Post.index_orphans).to eq([@posts.first.id])
     end
   end
 
@@ -223,7 +243,7 @@ describe 'ActiveRecord mixin' do
     it 'should remove orphans from the index' do
       Post.clean_index_orphans
       Sunspot.commit
-      Post.search.results.should == [@posts.last]
+      expect(Post.search.results).to eq([@posts.last])
     end
   end
 
@@ -235,7 +255,7 @@ describe 'ActiveRecord mixin' do
     it 'should index all instances' do
       Post.reindex(:batch_size => nil)
       Sunspot.commit
-      Post.search.results.to_set.should == @posts.to_set
+      expect(Post.search.results.to_set).to eq(@posts.to_set)
     end
 
     it 'should remove all currently indexed instances' do
@@ -244,7 +264,7 @@ describe 'ActiveRecord mixin' do
       old_post.destroy
       Post.reindex
       Sunspot.commit
-      Post.search.results.to_set.should == @posts.to_set
+      expect(Post.search.results.to_set).to eq(@posts.to_set)
     end
     
   end
@@ -257,7 +277,7 @@ describe 'ActiveRecord mixin' do
     it 'should index all instances' do
       Post.reindex(:batch_size => nil)
       Sunspot.commit
-      Post.search.results.to_set.should == @posts.to_set
+      expect(Post.search.results.to_set).to eq(@posts.to_set)
     end
 
     it 'should remove all currently indexed instances' do
@@ -266,14 +286,14 @@ describe 'ActiveRecord mixin' do
       old_post.destroy
       Post.reindex
       Sunspot.commit
-      Post.search.results.to_set.should == @posts.to_set
+      expect(Post.search.results.to_set).to eq(@posts.to_set)
     end
     
     describe "using batch sizes" do
       it 'should index with a specified batch size' do
         Post.reindex(:batch_size => 1)
         Sunspot.commit
-        Post.search.results.to_set.should == @posts.to_set
+        expect(Post.search.results.to_set).to eq(@posts.to_set)
       end
     end
   end
@@ -286,15 +306,20 @@ describe 'ActiveRecord mixin' do
       @posts = Array.new(2) { Post.create }
     end
 
-    describe "when not using batches" do
-      
-      it "should select all if the batch_size is nil" do
-        Post.should_receive(:all).with(:include => []).and_return([])
-        Post.reindex(:batch_size => nil)
-      end
+    it "should use batches if the batch_size is specified" do
+      expect_any_instance_of(relation(Post).class).to receive(:find_in_batches)
+      Post.reindex(:batch_size => 50)
+    end
 
+    it "should select all if the batch_size isn't greater than 0" do
+      expect_any_instance_of(relation(Post).class).not_to receive(:find_in_batches)
+      Post.reindex(:batch_size => nil)
+      Post.reindex(:batch_size => 0)
+    end
+
+    describe "when not using batches" do
       it "should search for models with includes" do
-        Post.should_receive(:all).with(:include => :author).and_return([])
+        expect(Post).to receive(:includes).with(:author).and_return(relation(Post))
         Post.reindex(:batch_size => nil, :include => :author)
       end
 
@@ -310,7 +335,7 @@ describe 'ActiveRecord mixin' do
         it 'should only index those models where :if constraints pass' do
           Post.reindex(:batch_size => nil)
 
-          Post.search.results.should_not include(@posts.first)
+          expect(Post.search.results).not_to include(@posts.first)
         end
       end
     
@@ -318,12 +343,12 @@ describe 'ActiveRecord mixin' do
 
     describe "when using batches" do
       it "should commit after indexing each batch" do
-        Sunspot.should_receive(:commit).twice
+        expect(Sunspot).to receive(:commit).twice
         Post.reindex(:batch_size => 1)
       end
 
       it "should commit after indexing everything" do
-        Sunspot.should_receive(:commit).once
+        expect(Sunspot).to receive(:commit).once
         Post.reindex(:batch_commit => false)
       end
 
@@ -339,7 +364,7 @@ describe 'ActiveRecord mixin' do
         it 'should only index those models where :if constraints pass' do
           Post.reindex(:batch_size => 50)
 
-          Post.search.results.should_not include(@posts.first)
+          expect(Post.search.results).not_to include(@posts.first)
         end
       end
     end
@@ -361,12 +386,13 @@ describe 'ActiveRecord mixin' do
     end
 
     it "should return results" do
-      @posts.first.more_like_this.results.should == [@posts[3], @posts[1]]
+      expect(@posts.first.more_like_this.results).to eq([@posts[3], @posts[1]])
     end
 
     it "should return results for specified classes" do
-      @posts.first.more_like_this(Post, PostWithAuto).results.to_set.should ==
+      expect(@posts.first.more_like_this(Post, PostWithAuto).results.to_set).to eq(
         Set[@posts_with_auto[0], @posts[1], @posts[3]]
+      )
     end
   end
 
@@ -382,7 +408,7 @@ describe 'ActiveRecord mixin' do
     end
 
     it 'should return IDs' do
-      @posts.first.more_like_this_ids.to_set.should == [@posts[3], @posts[1]].map { |post| post.id }.to_set
+      expect(@posts.first.more_like_this_ids.to_set).to eq([@posts[3], @posts[1]].map { |post| post.id }.to_set)
     end
   end
 
@@ -399,7 +425,7 @@ describe 'ActiveRecord mixin' do
       context 'constraint returns true' do
         # searchable :if => :returns_true
         before do
-          subject.should_receive(:returns_true).and_return(true)
+          expect(subject).to receive(:returns_true).and_return(true)
           subject.class.sunspot_options[:if] = :returns_true
         end
 
@@ -409,7 +435,7 @@ describe 'ActiveRecord mixin' do
       context 'constraint returns false' do
         # searchable :if => :returns_false
         before do
-          subject.should_receive(:returns_false).and_return(false)
+          expect(subject).to receive(:returns_false).and_return(false)
           subject.class.sunspot_options[:if] = :returns_false
         end
 
@@ -421,7 +447,7 @@ describe 'ActiveRecord mixin' do
       context 'constraint returns true' do
         # searchable :if => 'returns_true'
         before do
-          subject.should_receive(:returns_true).and_return(true)
+          expect(subject).to receive(:returns_true).and_return(true)
           subject.class.sunspot_options[:if] = 'returns_true'
         end
 
@@ -431,7 +457,7 @@ describe 'ActiveRecord mixin' do
       context 'constraint returns false' do
         # searchable :if => 'returns_false'
         before do
-          subject.should_receive(:returns_false).and_return(false)
+          expect(subject).to receive(:returns_false).and_return(false)
           subject.class.sunspot_options[:if] = 'returns_false'
         end
 
@@ -463,8 +489,8 @@ describe 'ActiveRecord mixin' do
       context 'all constraints returns true' do
         # searchable :if => [:returns_true_1, :returns_true_2]
         before do
-          subject.should_receive(:returns_true_1).and_return(true)
-          subject.should_receive(:returns_true_2).and_return(true)
+          expect(subject).to receive(:returns_true_1).and_return(true)
+          expect(subject).to receive(:returns_true_2).and_return(true)
           subject.class.sunspot_options[:if] = [:returns_true_1, 'returns_true_2']
         end
 
@@ -474,8 +500,8 @@ describe 'ActiveRecord mixin' do
       context 'one constraint returns false' do
         # searchable :if => [:returns_true, :returns_false]
         before do
-          subject.should_receive(:returns_true).and_return(true)
-          subject.should_receive(:returns_false).and_return(false)
+          expect(subject).to receive(:returns_true).and_return(true)
+          expect(subject).to receive(:returns_false).and_return(false)
           subject.class.sunspot_options[:if] = [:returns_true, 'returns_false']
         end
 
@@ -486,12 +512,12 @@ describe 'ActiveRecord mixin' do
     it 'removes the model from the index if the constraint does not match' do
       subject.save!
       Sunspot.commit
-      subject.class.search.results.should include(subject)
+      expect(subject.class.search.results).to include(subject)
 
       subject.class.sunspot_options[:if] = proc { false }
       subject.save!
       Sunspot.commit
-      subject.class.search.results.should_not include(subject)
+      expect(subject.class.search.results).not_to include(subject)
     end
   end
 
@@ -508,7 +534,7 @@ describe 'ActiveRecord mixin' do
       context 'constraint returns true' do
         # searchable :unless => :returns_true
         before do
-          subject.should_receive(:returns_true).and_return(true)
+          expect(subject).to receive(:returns_true).and_return(true)
           subject.class.sunspot_options[:unless] = :returns_true
         end
 
@@ -518,7 +544,7 @@ describe 'ActiveRecord mixin' do
       context 'constraint returns false' do
         # searchable :unless => :returns_false
         before do
-          subject.should_receive(:returns_false).and_return(false)
+          expect(subject).to receive(:returns_false).and_return(false)
           subject.class.sunspot_options[:unless] = :returns_false
         end
 
@@ -530,7 +556,7 @@ describe 'ActiveRecord mixin' do
       context 'constraint returns true' do
         # searchable :unless => 'returns_true'
         before do
-          subject.should_receive(:returns_true).and_return(true)
+          expect(subject).to receive(:returns_true).and_return(true)
           subject.class.sunspot_options[:unless] = 'returns_true'
         end
 
@@ -540,7 +566,7 @@ describe 'ActiveRecord mixin' do
       context 'constraint returns false' do
         # searchable :unless => 'returns_false'
         before do
-          subject.should_receive(:returns_false).and_return(false)
+          expect(subject).to receive(:returns_false).and_return(false)
           subject.class.sunspot_options[:unless] = 'returns_false'
         end
 
@@ -572,8 +598,8 @@ describe 'ActiveRecord mixin' do
       context 'all constraints returns true' do
         # searchable :unless => [:returns_true_1, :returns_true_2]
         before do
-          subject.should_receive(:returns_true_1).and_return(true)
-          subject.should_receive(:returns_true_2).and_return(true)
+          expect(subject).to receive(:returns_true_1).and_return(true)
+          expect(subject).to receive(:returns_true_2).and_return(true)
           subject.class.sunspot_options[:unless] = [:returns_true_1, 'returns_true_2']
         end
 
@@ -583,8 +609,8 @@ describe 'ActiveRecord mixin' do
       context 'one constraint returns false' do
         # searchable :unless => [:returns_true, :returns_false]
         before do
-          subject.should_receive(:returns_true).and_return(true)
-          subject.should_receive(:returns_false).and_return(false)
+          expect(subject).to receive(:returns_true).and_return(true)
+          expect(subject).to receive(:returns_false).and_return(false)
           subject.class.sunspot_options[:unless] = [:returns_true, 'returns_false']
         end
 

@@ -1,6 +1,6 @@
 begin
   require 'geohash'
-rescue LoadError => e
+rescue LoadError
   require 'pr_geohash'
 end
 
@@ -21,7 +21,7 @@ module Sunspot
       end
 
       def to_subquery
-        "(#{to_boolean_query})"
+        { :q => "(#{to_boolean_query})" }
       end
 
       private

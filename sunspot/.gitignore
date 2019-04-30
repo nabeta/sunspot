@@ -1,5 +1,7 @@
 sunspot-solr.pid
 *.swp
+*.swo
+*~
 coverage
 pkg
 /doc
@@ -9,3 +11,4 @@ pkg
 README.rdoc
 .bundle
 Gemfile.lock
+gemfiles/*.gemfile*

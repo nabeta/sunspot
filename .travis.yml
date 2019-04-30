@@ -1,34 +1,36 @@
+language: ruby
+sudo: false
+cache:
+  bundler: true
+  directories:
+    - sunspot/vendor/bundle
+    - sunspot_solr/vendor/bundle
+    - sunspot_rails/vendor/bundle
+
 rvm:
-  - 1.8.7
-  - 1.9.2
-  - 1.9.3
+  - 2.1.0
+  - 2.3.8
+  - 2.4.5
+  - 2.5.3
+  - ruby-head
   # - rbx-2.0
   # - jruby
 
 env:
-  - GEM=sunspot
-  - GEM=sunspot_rails RAILS=2.3.14
-  - GEM=sunspot_rails RAILS=3.0.10
-  - GEM=sunspot_rails RAILS=3.1.1
+  - GEM=sunspot UPDATE_FORMAT=xml
+  - GEM=sunspot UPDATE_FORMAT=json
+  - GEM=sunspot_rails
+  - GEM=sunspot_solr
 
-# Limit the size of the matrix by only performing one build against
-# 1.8.7 and 1.9.2
 matrix:
-  exclude:
-    - rvm: 1.8.7
-      env: GEM=sunspot_rails RAILS=3.0.10
-    - rvm: 1.8.7
-      env: GEM=sunspot_rails RAILS=3.1.1
-    - rvm: 1.9.2
-      env: GEM=sunspot_rails RAILS=3.0.10
-    - rvm: 1.9.2
-      env: GEM=sunspot_rails RAILS=3.1.1
+  allow_failures:
+    - rvm: ruby-head
 
-notifications:
-  irc: "irc.freenode.org#sunspot-ruby"
-  recipients:
-    - alindeman@gmail.com
-    - nick@onemorecloud.com
+before_install:
+  #  https://docs.travis-ci.com/user/languages/ruby/#bundler-20
+  - gem uninstall -v '>= 2' -i $(rvm gemdir)@global -ax bundler || true
+  - gem install bundler -v '< 2'
 
 script:
   - ci/travis.sh
+

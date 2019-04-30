@@ -46,6 +46,11 @@ module Sunspot #:nodoc:
         # :ignore_attribute_changes_of<Array>::
         #   Define attributes, that should not trigger a reindex of that
         #   object. Usual suspects are updated_at or counters.
+        # :only_reindex_attribute_changes_of<Array>::
+        #   Define attributes, that are the only attributes that should
+        #   trigger a reindex of that object. Useful if there are a small
+        #   number of searchable attributes and a large number of attributes
+        #   to ignore.
         # :include<Mixed>::
         #   Define default ActiveRecord includes, set this to allow ActiveRecord
         #   to load required associations when indexing. See ActiveRecord's 
@@ -85,16 +90,21 @@ module Sunspot #:nodoc:
 
             unless options[:auto_index] == false
               before_save :mark_for_auto_indexing_or_removal
-              after_save :perform_index_tasks
+
+              # after_commit :perform_index_tasks, :if => :persisted?
+              __send__ Sunspot::Rails.configuration.auto_index_callback,
+                       :perform_index_tasks,
+                       :if => :persisted?
             end
 
             unless options[:auto_remove] == false
-              after_destroy do |searchable|
-                searchable.remove_from_index
-              end
+              # after_commit { |searchable| searchable.remove_from_index }, :on => :destroy
+              __send__ Sunspot::Rails.configuration.auto_remove_callback,
+                       proc { |searchable| searchable.remove_from_index },
+                       :on => :destroy
             end
             options[:include] = Util::Array(options[:include])
-            
+
             self.sunspot_options = options
           end
         end
@@ -124,6 +134,8 @@ module Sunspot #:nodoc:
             alias_method :index, :solr_index unless method_defined? :index
             alias_method :index_orphans, :solr_index_orphans unless method_defined? :index_orphans
             alias_method :clean_index_orphans, :solr_clean_index_orphans unless method_defined? :clean_index_orphans
+            alias_method :atomic_update, :solr_atomic_update unless method_defined? :atomic_update
+            alias_method :atomic_update!, :solr_atomic_update! unless method_defined? :atomic_update!
           end
         end
         # 
@@ -238,34 +250,69 @@ module Sunspot #:nodoc:
         #
         def solr_index(opts={})
           options = {
-            :batch_size => 50,
+            :batch_size => Sunspot.config.indexing.default_batch_size,
             :batch_commit => true,
             :include => self.sunspot_options[:include],
-            :start => opts.delete(:first_id) || 0
+            :start => opts.delete(:first_id)
           }.merge(opts)
-          find_in_batch_options = {
-            :include => options[:include],
-            :batch_size => options[:batch_size],
-            :start => options[:first_id]
-          }
-          progress_bar = options[:progress_bar]
-          if options[:batch_size]
+
+          if options[:batch_size].to_i > 0
             batch_counter = 0
-            find_in_batches(find_in_batch_options) do |records|
-              solr_benchmark options[:batch_size], batch_counter do
-                Sunspot.index(records.select { |model| model.indexable? })
+            self.includes(options[:include]).find_in_batches(options.slice(:batch_size, :start)) do |records|
+
+              solr_benchmark(options[:batch_size], batch_counter += 1) do
+                Sunspot.index(records.select(&:indexable?))
                 Sunspot.commit if options[:batch_commit]
               end
-              # track progress
-              progress_bar.increment!(records.length) if progress_bar
-              batch_counter += 1
+
+              options[:progress_bar].increment!(records.length) if options[:progress_bar]
             end
           else
-            records = all(:include => options[:include]).select { |model| model.indexable? }
-            Sunspot.index!(records)
+            Sunspot.index! self.includes(options[:include]).select(&:indexable?)
           end
+
           # perform a final commit if not committing in batches
           Sunspot.commit unless options[:batch_commit]
+        end
+
+        #
+        # Update properties of existing records in the Solr index.
+        # Atomic updates available only for the stored properties.
+        #
+        # ==== Updates (passed as a hash)
+        #
+        # updates should be specified as a hash, where key - is the object ID
+        # and values is hash with property name/values to be updated.
+        #
+        # ==== Examples
+        #
+        #   class Post < ActiveRecord::Base
+        #     searchable do
+        #       string :title, stored: true
+        #       string :description, stored: true
+        #     end
+        #   end
+        #
+        #   post1 = Post.create(title: 'A Title', description: nil)
+        #
+        #   # update single property
+        #   Post.atomic_update(post1.id => {description: 'New post description'})
+        #
+        # ==== Notice
+        # all non-stored properties in Solr index will be lost after update.
+        # Read Solr wiki page: https://wiki.apache.org/solr/Atomic_Updates
+        def solr_atomic_update(updates = {})
+          Sunspot.atomic_update(self, updates)
+        end
+
+        #
+        # Update properties of existing records in the Solr index atomically, and
+        # immediately commits.
+        #
+        # See #solr_atomic_update for information on options, etc.
+        #
+        def solr_atomic_update!(updates = {})
+          Sunspot.atomic_update!(self, updates)
         end
 
         # 
@@ -275,16 +322,25 @@ module Sunspot #:nodoc:
         # wrong. Usually you will want to rectify the situation by calling
         # #clean_index_orphans or #reindex
         # 
+        # ==== Options (passed as a hash)
+        #
+        # batch_size<Integer>:: Override default batch size with which to load records.
+        # 
         # ==== Returns
         #
         # Array:: Collection of IDs that exist in Solr but not in the database
-        def solr_index_orphans
-          count = self.count
-          indexed_ids = solr_search_ids { paginate(:page => 1, :per_page => count) }.to_set
-          all(:select => 'id').each do |object|
-            indexed_ids.delete(object.id)
+        def solr_index_orphans(opts={})
+          batch_size = opts[:batch_size] || Sunspot.config.indexing.default_batch_size          
+
+          solr_page = 0
+          solr_ids = []
+          while (solr_page = solr_page.next)
+            ids = solr_search_ids { paginate(:page => solr_page, :per_page => batch_size) }.to_a
+            break if ids.empty?
+            solr_ids.concat ids
           end
-          indexed_ids.to_a
+
+          return solr_ids - self.connection.select_values("SELECT id FROM #{quoted_table_name}").collect(&:to_i)
         end
 
         # 
@@ -293,8 +349,12 @@ module Sunspot #:nodoc:
         # circumstances, this should not be necessary; this method is provided
         # in case something goes wrong.
         #
-        def solr_clean_index_orphans
-          solr_index_orphans.each do |id|
+        # ==== Options (passed as a hash)
+        #
+        # batch_size<Integer>:: Override default batch size with which to load records
+        # 
+        def solr_clean_index_orphans(opts={})
+          solr_index_orphans(opts).each do |id|
             new do |fake_instance|
               fake_instance.id = id
             end.solr_remove_from_index
@@ -314,15 +374,15 @@ module Sunspot #:nodoc:
         end
         
         def solr_execute_search(options = {})
-          options.assert_valid_keys(:include, :select)
+          inherited_attributes = [:include, :select, :scopes]
+          options.assert_valid_keys(*inherited_attributes)
           search = yield
           unless options.empty?
             search.build do |query|
-              if options[:include]
-                query.data_accessor_for(self).include = options[:include]
-              end
-              if options[:select]
-                query.data_accessor_for(self).select = options[:select]
+              inherited_attributes.each do |attr|
+                if options[attr]
+                  query.data_accessor_for(self).send("#{attr}=", options[attr])
+                end
               end
             end
           end
@@ -358,6 +418,8 @@ module Sunspot #:nodoc:
             alias_method :remove_from_index!, :solr_remove_from_index! unless method_defined? :remove_from_index!
             alias_method :more_like_this, :solr_more_like_this unless method_defined? :more_like_this
             alias_method :more_like_this_ids, :solr_more_like_this_ids unless method_defined? :more_like_this_ids
+            alias_method :atomic_update, :solr_atomic_update unless method_defined? :atomic_update
+            alias_method :atomic_update!, :solr_atomic_update! unless method_defined? :atomic_update!
           end
         end
         # 
@@ -377,6 +439,23 @@ module Sunspot #:nodoc:
         #
         def solr_index!
           Sunspot.index!(self)
+        end
+
+        #
+        # Updates specified model properties in Solr.
+        # Unlike ClassMethods#solr_atomic_update you dont need to pass object id,
+        # you only need to pass hash with property changes
+        #
+        def solr_atomic_update(updates = {})
+          Sunspot.atomic_update(self.class, self.id => updates)
+        end
+
+        #
+        # Updates specified model properties in Solr and immediately commit.
+        # See #solr_atomic_update
+        #
+        def solr_atomic_update!(updates = {})
+          Sunspot.atomic_update!(self.class, self.id => updates)
         end
         
         # 
@@ -450,6 +529,8 @@ module Sunspot #:nodoc:
             @marked_for_auto_indexing =
               if !new_record? && ignore_attributes = self.class.sunspot_options[:ignore_attribute_changes_of]
                 !(changed.map { |attr| attr.to_sym } - ignore_attributes).blank?
+              elsif !new_record? && only_attributes = self.class.sunspot_options[:only_reindex_attribute_changes_of]
+                !(changed.map { |attr| attr.to_sym } & only_attributes).blank?
               else
                 true
               end

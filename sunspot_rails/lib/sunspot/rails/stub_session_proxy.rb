@@ -7,10 +7,20 @@ module Sunspot
         @original_session = original_session
       end
 
+      def batch
+        yield
+      end
+
       def index(*objects)
       end
 
       def index!(*objects)
+      end
+
+      def atomic_update(clazz, updates = {})
+      end
+
+      def atomic_update!(clazz, updates = {})
       end
 
       def remove(*objects)
@@ -31,6 +41,13 @@ module Sunspot
       def remove_all!(clazz = nil)
       end
 
+      def optimize
+      end
+
+      def config
+        Sunspot::Configuration.build
+      end
+
       def dirty?
         false
       end
@@ -39,13 +56,13 @@ module Sunspot
         false
       end
 
-      def commit_if_dirty
+      def commit_if_dirty(soft_commit = false)
       end
 
-      def commit_if_delete_dirty
+      def commit_if_delete_dirty(soft_commit = false)
       end
 
-      def commit
+      def commit(soft_commit = false)
       end
 
       def search(*types)
@@ -55,13 +72,21 @@ module Sunspot
       def new_search(*types)
         Search.new
       end
-      
+
+      def more_like_this(*args)
+        Search.new
+      end
+
       def new_more_like_this(*args)
         Search.new
       end
 
+      class DataAccessorStub
+        attr_accessor :include, :select
+      end
+
       class Search
-        
+
         def build
           self
         end
@@ -73,39 +98,54 @@ module Sunspot
         def hits(options = {})
           PaginatedCollection.new
         end
+        alias_method :raw_results, :hits
 
         def total
           0
         end
 
+        def facets
+          []
+        end
+
         def facet(name)
+          FacetStub.new
         end
 
         def dynamic_facet(name)
+          FacetStub.new
+        end
+
+        def data_accessor_for(klass)
+          DataAccessorStub.new
+        end
+
+        def stats(name)
+          StatsStub.new
         end
 
         def execute
           self
         end
       end
-      
-      
+
+
       class PaginatedCollection < Array
-        
+
         def total_count
           0
         end
         alias :total_entries :total_count
-        
+
         def current_page
           1
         end
-        
+
         def per_page
           30
         end
         alias :limit_value :per_page
-        
+
         def total_pages
           1
         end
@@ -122,6 +162,7 @@ module Sunspot
         def previous_page
           nil
         end
+        alias :prev_page :previous_page
 
         def next_page
           nil
@@ -134,9 +175,60 @@ module Sunspot
         def offset
           0
         end
-        
+
       end
-      
+
+      class FacetStub
+
+        def rows
+          []
+        end
+
+      end
+
+      class StatsStub
+        def min
+          0
+        end
+
+        def max
+          100
+        end
+
+        def count
+          30
+        end
+
+        def sum
+          500
+        end
+
+        def missing
+          3
+        end
+
+        def sum_of_squares
+          5000
+        end
+
+        def mean
+          50
+        end
+
+        def standard_deviation
+          20
+        end
+
+        def facets
+          []
+        end
+
+        def facet(name)
+          FacetStub.new
+        end
+
+      end
+
     end
   end
 end

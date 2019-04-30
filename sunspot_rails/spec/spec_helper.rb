@@ -1,48 +1,42 @@
-ENV['RAILS_ENV'] = 'test'
-if rsolr_version = ENV['RSOLR_GEM_VERSION']
-  STDERR.puts("Forcing RSolr version #{rsolr_version}")
-  gem "rsolr", rsolr_version
+ENV["RAILS_ENV"] ||= 'test'
+
+require File.expand_path('config/environment', File.expand_path('../rails_app', __FILE__))
+require File.expand_path('../../lib/sunspot_rails', __FILE__)
+require 'rspec/rails'
+
+if RSolr::VERSION >= '2'
+  require File.join('sunspot', 'rails', 'solr_logging')
 end
-
-require File.expand_path('config/environment', ENV['RAILS_ROOT'])
-
-begin
-  require 'rspec'
-  require 'rspec/rails'
-rescue LoadError => e
-  require 'spec'
-  require 'spec/rails'
-end
-require 'rake'
-require File.join('sunspot', 'rails', 'solr_logging')
-
-def load_schema
-  stdout = $stdout
-  $stdout = StringIO.new # suppress output while building the schema
-  load File.join(ENV['RAILS_ROOT'], 'db', 'schema.rb')
-  $stdout = stdout
-end
-
-def silence_stderr(&block)
-  stderr = $stderr
-  $stderr = StringIO.new
-  yield
-  $stderr = stderr
-end
-
-rspec =
-  begin
-    RSpec
-  rescue NameError, ArgumentError
-    Spec::Runner
-  end
 
 # Load all shared examples
-Dir[File.expand_path("shared_examples/*.rb", File.dirname(__FILE__))].each {|f| require f}
+Dir[File.expand_path("shared_examples/*.rb", File.dirname(__FILE__))].each { |f| require f }
 
-rspec.configure do |config|
+# Load the schema
+load File.join(File.expand_path('../rails_app', __FILE__), 'db', 'schema.rb')
+
+RSpec.configure do |config|
+  config.use_transactional_fixtures = true
+  config.infer_base_class_for_anonymous_controllers = false
+  config.order = 'random'
+  config.infer_spec_type_from_file_location!
+
   config.before(:each) do
-    load_schema
+    empty_tables
     Sunspot.remove_all!
   end
+end
+
+def empty_tables
+  sources = if Rails::VERSION::MAJOR > 4
+              ActiveRecord::Base.connection.data_sources
+            else
+              ActiveRecord::Base.connection.tables
+            end
+  sources.each do |table_name|
+    ActiveRecord::Base.connection.execute("DELETE FROM #{table_name}") unless table_name == 'schema_migrations'
+  end
+end
+
+def relation(clazz)
+  Rails::VERSION::MAJOR >= 4 ? clazz.all : clazz.scoped
 end

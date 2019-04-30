@@ -18,12 +18,20 @@ module Sunspot
         @sorts << sort
       end
 
+      #
+      # Check sort presence
+      #
+      def include?(sort)
+        @sorts.any? { |s| s.to_param.include?(sort) }
+      end
+
       # 
       # Combine the sorts into a single param by joining them
       #
-      def to_params
+      def to_params(prefix = "")
         unless @sorts.empty?
-          { :sort => @sorts.map { |sort| sort.to_param } * ', ' }
+          key = "#{prefix}sort".to_sym
+          { key => @sorts.map { |sort| sort.to_param } * ', ' }
         else
           {}
         end

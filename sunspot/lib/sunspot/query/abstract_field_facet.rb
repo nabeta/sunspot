@@ -1,8 +1,6 @@
 module Sunspot
   module Query
     class AbstractFieldFacet
-      include RSolr::Char
-
       def initialize(field, options)
         @field, @options = field, options
       end
@@ -26,8 +24,11 @@ module Sunspot
         if @options[:limit]
           params[qualified_param('limit')] = @options[:limit].to_i
         end
+        if @options[:offset]
+          params[qualified_param('offset')] = @options[:offset].to_i
+        end
         if @options[:prefix]
-          params[qualified_param('prefix')] = escape(@options[:prefix].to_s)
+          params[qualified_param('prefix')] = @options[:prefix].to_s
         end
         params[qualified_param('mincount')] = 
           case

@@ -12,6 +12,7 @@ module Sunspot
       @name, @type = name.to_sym, type
       @stored = !!options.delete(:stored)
       @more_like_this = !!options.delete(:more_like_this)
+      @multiple ||= false
       set_indexed_name(options)
       raise ArgumentError, "Field of type #{type} cannot be used for more_like_this" unless type.accepts_more_like_this? or !@more_like_this
     end
@@ -34,7 +35,7 @@ module Sunspot
     #
     def to_indexed(value)
       if value.is_a? Array
-        if @multiple
+        if multiple?
           value.map { |val| to_indexed(val) }
         else
           raise ArgumentError, "#{name} is not a multiple-value field, so it cannot index values #{value.inspect}"
@@ -81,16 +82,45 @@ module Sunspot
       !!@more_like_this
     end
 
+    #
+    # Whether the field was joined from another model.
+    #
+    # ==== Returns
+    #
+    # Boolean:: True if this field was joined from another model
+    #
+    def joined?
+      !!@joined
+    end
+
+    #
+    # Whether the field is stored or not.
+    #
+    # ==== Returns
+    #
+    # Boolean:: True if this field is a stored field
+    #
+    def stored?
+      !!@stored
+    end
+
     def hash
       indexed_name.hash
     end
 
     def eql?(field)
-      indexed_name == field.indexed_name
+      field.is_a?(self.class) && indexed_name == field.indexed_name
     end
     alias_method :==, :eql?
 
     private
+
+    #
+    # Raise if an unknown option passed
+    #
+    def check_options(options)
+      raise ArgumentError, "Unknown field option #{options.keys.first.inspect} provided for field #{name.inspect}" unless options.empty?
+    end
 
     #
     # Determine the indexed name. If the :as option is given use that, otherwise
@@ -104,9 +134,10 @@ module Sunspot
     def set_indexed_name(options)
       @indexed_name =
         if options[:as]
-          options.delete(:as)
+          options.delete(:as).to_s
         else
-          "#{@type.indexed_name(@name).to_s}#{'m' if @multiple }#{'s' if @stored}#{'v' if more_like_this?}"
+          name = options[:prefix] ? @name.to_s.sub(/^#{options[:prefix]}_/, '') : @name
+          "#{@type.indexed_name(name)}#{'m' if multiple? }#{'s' if @stored}#{'v' if more_like_this?}"
         end
     end
 
@@ -128,7 +159,8 @@ module Sunspot
       @multiple = true
       @boost = options.delete(:boost)
       @default_boost = options.delete(:default_boost)
-      raise ArgumentError, "Unknown field option #{options.keys.first.inspect} provided for field #{name.inspect}" unless options.empty?
+
+      check_options(options)
     end
 
     def indexed_name
@@ -153,9 +185,50 @@ module Sunspot
         elsif reference.respond_to?(:to_sym)
           reference.to_sym
         end
-      raise ArgumentError, "Unknown field option #{options.keys.first.inspect} provided for field #{name.inspect}" unless options.empty?
+
+      check_options(options)
+    end
+  end
+
+  #
+  # JoinField encapsulates attributes from referenced models.
+  # Could be of any type
+  #
+  class JoinField < Field #:nodoc:
+    attr_reader :default_boost, :target
+
+    def initialize(name, type, options = {})
+      @multiple = !!options.delete(:multiple)
+
+      super(name, type, options)
+
+      @prefix = options.delete(:prefix)
+      @join = options.delete(:join)
+      @clazz = options.delete(:clazz)
+      @target = options.delete(:target)
+      @default_boost = options.delete(:default_boost)
+      @joined = true
+
+      check_options(options)
     end
 
+    def from
+      Sunspot::Setup.for(@target).field(@join[:from]).indexed_name
+    end
+
+    def to
+      Sunspot::Setup.for(@clazz).field(@join[:to]).indexed_name
+    end
+
+    def local_params
+      "{!join from=#{from} to=#{to}}"
+    end
+
+    def eql?(field)
+      super && target == field.target && from == field.from && to == field.to
+    end
+
+    alias_method :==, :eql?
   end
 
   class TypeField #:nodoc:

@@ -1,7 +1,7 @@
 require 'singleton'
 begin
   require 'geohash'
-rescue LoadError => e
+rescue LoadError
   require 'pr_geohash'
 end
 
@@ -353,6 +353,47 @@ module Sunspot
         GeoHash.encode(value.lat.to_f, value.lng.to_f, 12)
       end
     end
+
+    # 
+    # The Latlon type encodes geographical coordinates in the native
+    # Solr LatLonType.
+    #
+    # The data for this type must respond to the `lat` and `lng` methods; you
+    # can use Sunspot::Util::Coordinates as a wrapper if your source data does
+    # not follow this API.
+    #
+    # Location fields can be used with the geospatial DSL. See the
+    # Geospatial section of the README for examples.
+    #
+    class LatlonType < AbstractType
+      def indexed_name(name)
+        "#{name}_ll"
+      end
+
+      def to_indexed(value)
+        "#{value.lat.to_f},#{value.lng.to_f}"
+      end
+    end
+
+    class DateRangeType < DateType
+      def indexed_name(name)
+        "#{name}_dr"
+      end
+
+      def to_indexed(value)
+        if value.respond_to?(:first) && value.respond_to?(:last)
+          "[#{super value.first} TO #{super value.last}]"
+        else
+          super value
+        end
+      end
+
+      def cast(value)
+        return super unless m = value.match(/^\[(?<start>.+) TO (?<end>.+)\]$/)
+        Range.new super(m[:start]), super(m[:end])
+      end
+    end
+    register DateRangeType, Range
 
     class ClassType < AbstractType
       def indexed_name(name) #:nodoc:
